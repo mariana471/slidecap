@@ -1,0 +1,975 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1217">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SlideCap">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<title>SlideCap</title>
+<style>
+/* Layout: one-screen camera app. Viewfinder on top with corner handles, control strip, gallery + recording/transcript below. Dark-only (used in dim lecture halls). */
+:root{
+  --bg:#0f1217; --panel:#171c24; --panel-2:#1f2630; --line:#2a3340;
+  --fg:#e9edf2; --muted:#8b96a5; --accent:#ffb454; --accent-fg:#1a1200;
+  --ok:#4cd17a; --warn:#ffd166; --bad:#ff6b6b; --rec:#ff5a5a;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 var(--font);
+  padding-left:max(10px,env(safe-area-inset-left,0px));padding-right:max(10px,env(safe-area-inset-right,0px));
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+  display:flex;flex-direction:column;gap:8px;overflow-x:hidden;-webkit-text-size-adjust:100%}
+header{display:flex;align-items:center;gap:10px;padding-block:8px 2px}
+header h1{font-size:17px;margin:0;letter-spacing:.3px}
+header h1 span{color:var(--accent)}
+#status{margin-left:auto;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;text-align:right;min-width:0}
+#status i{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block;flex:none}
+#status.ok i{background:var(--ok)} #status.warn i{background:var(--warn)} #status.bad i{background:var(--bad)}
+#wake{font-size:11px;color:var(--warn);display:none}
+#wake.show{display:inline}
+
+#stage{position:relative;background:#000;border-radius:10px;overflow:hidden;aspect-ratio:16/9;max-width:100%;max-height:52vh;margin:0 auto;width:100%}
+#stage.portrait{aspect-ratio:3/4}
+#video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+#overlay{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
+#hint{position:absolute;left:0;right:0;bottom:0;padding:8px 12px;background:linear-gradient(transparent,rgba(0,0,0,.7));font-size:12px;color:#ddd;pointer-events:none}
+#flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .25s}
+#flash.on{opacity:.6;transition:none}
+#preview{position:absolute;right:8px;top:8px;width:26%;max-width:200px;border:2px solid var(--accent);border-radius:6px;display:none;background:#000}
+#preview.show{display:block}
+
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button,select,input[type=file]{font:inherit}
+button{background:var(--panel-2);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px 14px;cursor:pointer;min-height:42px;touch-action:manipulation}
+button:disabled{opacity:.45;cursor:default}
+button.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
+button.danger{border-color:#5a2b2b;color:#ffb3b3}
+button.active{outline:2px solid var(--accent);outline-offset:-2px}
+button.rec{outline:2px solid var(--rec);outline-offset:-2px}
+button.big{flex:1 1 120px}
+button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+select{background:var(--panel-2);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px}
+label.inline{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px}
+input[type=range]{accent-color:var(--accent);width:120px}
+#camCtl{display:none}
+#camCtl.show{display:flex}
+#camCtl input[type=range]{width:150px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.panel h2{font-size:13px;margin:0 0 8px;color:var(--muted);font-weight:600;letter-spacing:.4px;text-transform:uppercase}
+details.panel summary{cursor:pointer;font-size:13px;color:var(--muted);font-weight:600;letter-spacing:.4px;text-transform:uppercase;list-style:none}
+details.panel summary::-webkit-details-marker{display:none}
+details.panel[open] summary{margin-bottom:10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
+.slide{position:relative;background:#000;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+.slide img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover}
+.slide .n{position:absolute;left:6px;top:4px;font-size:11px;background:rgba(0,0,0,.6);padding:1px 6px;border-radius:6px;font-variant-numeric:tabular-nums}
+.slide .x{position:absolute;right:4px;top:3px;background:rgba(0,0,0,.6);border:0;color:#fff;border-radius:6px;padding:0 7px;min-height:22px;line-height:22px;font-size:13px}
+.slide .ocr{position:absolute;right:6px;bottom:4px;font-size:10px;color:#fff;background:rgba(0,0,0,.55);padding:1px 5px;border-radius:5px}
+.slide .u{position:absolute;left:6px;bottom:4px;font-size:10px;color:#ffb3b3;background:rgba(0,0,0,.55);padding:1px 5px;border-radius:5px}
+#transcript{max-height:160px;overflow:auto;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-word;color:#cfd6df}
+#transcript .interim{color:var(--muted)}
+#transcript b{color:var(--accent);font-weight:600;font-variant-numeric:tabular-nums}
+#recState{font-variant-numeric:tabular-nums;color:var(--rec);font-weight:600}
+.muted{color:var(--muted);font-size:12px}
+.spacer{flex:1}
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#000c;color:#fff;padding:10px 14px;border-radius:10px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw;text-align:center;z-index:50}
+#toast.show{opacity:1}
+#viewer{position:fixed;inset:0;background:#000e;display:none;align-items:center;justify-content:center;z-index:40;flex-direction:column;gap:10px;padding:12px}
+#viewer.show{display:flex}
+#viewer img{max-width:100%;max-height:70vh;border-radius:6px}
+#viewer pre{max-width:100%;max-height:18vh;overflow:auto;font:12px/1.4 var(--font);white-space:pre-wrap;color:#ccc;margin:0}
+.confirm{display:none;gap:8px;align-items:center}
+.confirm.show{display:flex}
+[hidden]{display:none!important}
+@media (max-width:520px){ button{padding:9px 11px} input[type=range]{width:90px} }
+@media (prefers-reduced-motion:reduce){ #flash{transition:none} }
+</style>
+</head>
+<body>
+<header>
+  <h1>Slide<span>Cap</span></h1>
+  <div id="status"><span id="wake">⚠ 화면 꺼짐 방지 안 됨</span><i></i><span id="statusText">대기 중</span></div>
+</header>
+
+<div id="stage">
+  <video id="video" playsinline muted autoplay></video>
+  <canvas id="overlay"></canvas>
+  <canvas id="preview"></canvas>
+  <div id="flash"></div>
+  <div id="hint">카메라를 켜면 밝은 화면(스크린)을 자동으로 찾습니다. 모서리를 드래그해 직접 맞출 수도 있습니다.</div>
+</div>
+
+<div class="row">
+  <button id="btnStart" class="primary big">📷 카메라 시작</button>
+  <button id="btnShot" class="big" disabled>수동 캡처</button>
+  <button id="btnLock" disabled title="영역 고정/자동">자동 영역</button>
+  <button id="btnRec" title="발표 음성을 무음으로 녹음">⏺ 녹음</button>
+</div>
+<div id="camCtl" class="row">
+  <label class="inline" id="zoomL" hidden>줌 <input type="range" id="zoom"> <span id="zoomV"></span></label>
+  <label class="inline" id="expL" hidden>노출 <input type="range" id="exp"> <span id="expV"></span></label>
+</div>
+
+<details class="panel" id="settings">
+  <summary>설정</summary>
+  <div class="row" style="row-gap:12px">
+    <label class="inline">카메라 <select id="camSel"><option value="">후면(기본)</option></select></label>
+    <label class="inline">슬라이드 비율
+      <select id="aspectSel"><option value="1.7778">16:9</option><option value="1.3333">4:3</option><option value="1.6">16:10</option><option value="auto">자동 추정</option></select></label>
+    <label class="inline">변화 민감도 <input type="range" id="sens" min="4" max="30" value="11"> <span id="sensV">11</span></label>
+    <label class="inline">안정 대기 <input type="range" id="stable" min="1" max="6" value="3"> <span id="stableV">3</span>프레임</label>
+    <label class="inline"><input type="checkbox" id="dedupe" checked> 이미 저장한 슬라이드로 돌아가면 건너뛰기</label>
+    <label class="inline"><input type="checkbox" id="ocrOn" checked> 저장 시 글자 인식(OCR, 첫 사용 때 약 9MB 내려받음)</label>
+    <label class="inline">OCR 언어 <select id="ocrLang"><option value="kor+eng">한국어+영어</option><option value="eng">영어</option></select></label>
+    <label class="inline">저장 해상도 <select id="outW"><option value="1600">1600px</option><option value="1920">1920px</option><option value="1280">1280px</option></select></label>
+  </div>
+  <div class="row" style="margin-top:12px">
+    <label class="inline">파일로 처리: <input type="file" id="fileIn" accept="video/*,image/*" multiple></label>
+    <span class="muted">녹화한 영상이나 비스듬히 찍은 사진도 같은 방식으로 슬라이드를 추출합니다.</span>
+  </div>
+</details>
+
+<div class="panel">
+  <div class="row" style="margin-bottom:8px">
+    <h2 style="margin:0">저장된 슬라이드 <span id="count">0</span>장</h2>
+    <span class="spacer"></span>
+    <button id="btnZip">⬇ ZIP 만들기</button>
+    <button id="btnShare">사진 앱으로 공유</button>
+    <button id="btnCopy">텍스트 복사</button>
+    <button id="btnClear" class="danger">모두 삭제</button>
+    <span id="clearConfirm" class="confirm"><span class="muted">슬라이드·녹음·자막을 모두 지웁니다. 정말 삭제할까요?</span><button id="btnClearYes" class="danger">삭제</button><button id="btnClearNo">취소</button></span>
+  </div>
+  <div id="grid" class="grid"></div>
+  <p id="empty" class="muted">아직 저장된 슬라이드가 없습니다. 발표 화면이 바뀌고 약 1초 안정되면 자동으로 저장됩니다.</p>
+</div>
+
+<div class="panel">
+  <div class="row" style="margin-bottom:6px">
+    <h2 style="margin:0">발표 내용</h2>
+    <span id="recState"></span>
+    <span class="spacer"></span>
+    <label class="inline">실시간 자막 언어 <select id="spLang"><option value="ko-KR">한국어</option><option value="en-US">영어(미국)</option><option value="en-GB">영어(영국)</option><option value="ja-JP">일본어</option></select></label>
+    <button id="btnSpeech">💬 실시간 자막 꺼짐</button>
+  </div>
+  <div id="transcript"><span class="muted">⏺ 녹음은 소리 없이 발표 음성을 저장하고, 슬라이드마다 녹음 시각을 함께 기록합니다(ZIP에 포함). 실시간 자막은 인터넷이 필요하고 갤럭시에서는 시작할 때마다 알림음이 나므로 무음 모드로 두세요. 아이패드 홈 화면 앱에서는 실시간 자막이 동작하지 않습니다(Safari 탭에서는 가능).</span></div>
+</div>
+
+<p class="muted" style="margin:0 0 12px">
+  팁: 가로로 들고 삼각대나 받침에 두면 흔들림 없이 가장 잘 인식됩니다. 저장은 이 기기 브라우저 안에 보관되며 앱을 닫아도 남지만, 발표가 끝나면 ZIP으로 꼭 내려받으세요.
+</p>
+
+<div id="viewer"><img id="viewerImg" alt="slide"><pre id="viewerTxt"></pre><div class="row"><button id="viewerClose">닫기</button><button id="viewerDel" class="danger">이 슬라이드 삭제</button></div></div>
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js" defer></script>
+<script>
+'use strict';
+// ---------- helpers ----------
+const $=id=>document.getElementById(id);
+const video=$('video'), overlay=$('overlay'), octx=overlay.getContext('2d');
+const previewC=$('preview'), pctx=previewC.getContext('2d');
+const UA=navigator.userAgent, isAndroid=/Android/i.test(UA), isApple=/iPhone|iPad|iPod/.test(UA)||(/Macintosh/.test(UA)&&navigator.maxTouchPoints>1);
+let toastT; function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),3200);}
+function setStatus(cls,msg){const s=$('status');s.className=cls||'';$('statusText').textContent=msg;}
+const pad=(n,w)=>String(n).padStart(w||2,'0');
+const pad3=n=>pad(n,3);
+function stamp(d){return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;}
+function mmss(ms){const s=Math.max(0,Math.round(ms/1000));return `${pad(Math.floor(s/60))}:${pad(s%60)}`;}
+function fileStamp(d){d=d||new Date();return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;}
+function slideTime(s){return s.src==='video'?mmss(s.ts):stamp(new Date(s.ts));}
+function toBlob(c,type,q){return new Promise(r=>c.toBlob(r,type,q));}
+function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+
+// ---------- state ----------
+const S={
+  stream:null, running:false, starting:false, source:'camera', img:null,
+  quad:null, locked:false, quadSince:0, candidate:null, candCount:0, missCount:0, detRing:[],
+  hist:[], stableCount:0, unstableSince:null, lastSaveAt:-1e9, lastReplaceAt:-1e9, capTimes:[], capturing:false,
+  slides:[], transcript:[], tempId:-1, zipFile:null, shareIdx:0,
+  speechOn:false, sr:null, spFail:0, spLast:0, ocrWorker:null, ocrLang:'', ocrCount:0, ocrQueue:[], ocrBusy:false,
+  rec:null, audioStream:null, recStart:null, recIdx:0, recBytes:0,
+  dragging:-1, wakeLock:null, timer:null, lastVideoTime:-1, staleTicks:0, hiddenAt:0
+};
+const DET_W=320, TW=96, TH=54, BX=12, BY=6, BW=8, BH=9, NB=BX*BY;
+const STABLE_MAX=8, BLOCK_CHANGED=10, REPLACE_MAX=18;
+const SHIFTS=[[0,0],[1,0],[-1,0],[0,1],[0,-1]];
+
+// ---------- image math ----------
+function solve(A,b){
+  const n=b.length;
+  for(let i=0;i<n;i++){
+    let p=i; for(let r=i+1;r<n;r++) if(Math.abs(A[r][i])>Math.abs(A[p][i])) p=r;
+    [A[i],A[p]]=[A[p],A[i]]; [b[i],b[p]]=[b[p],b[i]];
+    const d=A[i][i]||1e-12;
+    for(let r=i+1;r<n;r++){const f=A[r][i]/d; if(!f) continue; for(let c=i;c<n;c++) A[r][c]-=f*A[i][c]; b[r]-=f*b[i];}
+  }
+  const x=new Array(n).fill(0);
+  for(let i=n-1;i>=0;i--){let s=b[i]; for(let c=i+1;c<n;c++) s-=A[i][c]*x[c]; x[i]=s/(A[i][i]||1e-12);}
+  return x;
+}
+function homography(from,to){ // to = H * from
+  const A=[],b=[];
+  for(let i=0;i<4;i++){const [x,y]=from[i],[u,v]=to[i];
+    A.push([x,y,1,0,0,0,-u*x,-u*y]); b.push(u);
+    A.push([0,0,0,x,y,1,-v*x,-v*y]); b.push(v);}
+  const h=solve(A,b); return [h[0],h[1],h[2],h[3],h[4],h[5],h[6],h[7],1];
+}
+function warpRGBA(src,sw,sh,quad,ow,oh){ // bilinear inverse mapping
+  const H=homography([[0,0],[ow,0],[ow,oh],[0,oh]],quad);
+  const out=new Uint8ClampedArray(ow*oh*4);
+  for(let v=0;v<oh;v++){
+    const vy=v+0.5;
+    for(let u=0;u<ow;u++){
+      const ux=u+0.5, w=H[6]*ux+H[7]*vy+1;
+      let x=(H[0]*ux+H[1]*vy+H[2])/w-0.5, y=(H[3]*ux+H[4]*vy+H[5])/w-0.5;
+      if(x<0)x=0; if(y<0)y=0; if(x>sw-1.001)x=sw-1.001; if(y>sh-1.001)y=sh-1.001;
+      const x0=x|0,y0=y|0,fx=x-x0,fy=y-y0;
+      const i00=(y0*sw+x0)*4,i01=i00+4,i10=i00+sw*4,i11=i10+4,o=(v*ow+u)*4;
+      const a=(1-fx)*(1-fy),b=fx*(1-fy),c=(1-fx)*fy,d=fx*fy;
+      out[o]  =src[i00]*a+src[i01]*b+src[i10]*c+src[i11]*d;
+      out[o+1]=src[i00+1]*a+src[i01+1]*b+src[i10+1]*c+src[i11+1]*d;
+      out[o+2]=src[i00+2]*a+src[i01+2]*b+src[i10+2]*c+src[i11+2]*d;
+      out[o+3]=255;
+    }
+  }
+  return out;
+}
+// 96x54 grayscale thumbnail of the quad, 2x2 supersampled bilinear, with mean/std for gain+offset matching
+function makeThumb(gray,sw,sh,quad){
+  const H=homography([[0,0],[TW,0],[TW,TH],[0,TH]],quad);
+  const d=new Float32Array(TW*TH); let sum=0;
+  for(let v=0;v<TH;v++)for(let u=0;u<TW;u++){
+    let acc=0;
+    for(let sy=0;sy<2;sy++)for(let sx=0;sx<2;sx++){
+      const ux=u+0.25+sx*0.5, vy=v+0.25+sy*0.5, w=H[6]*ux+H[7]*vy+1;
+      let x=(H[0]*ux+H[1]*vy+H[2])/w-0.5, y=(H[3]*ux+H[4]*vy+H[5])/w-0.5;
+      if(x<0)x=0; if(y<0)y=0; if(x>sw-1.001)x=sw-1.001; if(y>sh-1.001)y=sh-1.001;
+      const x0=x|0,y0=y|0,fx=x-x0,fy=y-y0,i=y0*sw+x0;
+      acc+=gray[i]*(1-fx)*(1-fy)+gray[i+1]*fx*(1-fy)+gray[i+sw]*(1-fx)*fy+gray[i+sw+1]*fx*fy;
+    }
+    const val=acc*0.25; d[v*TW+u]=val; sum+=val;
+  }
+  return finishThumb(d,sum/(TW*TH));
+}
+function finishThumb(d,mean){let sq=0;for(let i=0;i<d.length;i++){const z=d[i]-mean;sq+=z*z;}return {d,mean,std:Math.max(12,Math.sqrt(sq/d.length))};}
+function thumbFromU8(u8){const d=Float32Array.from(u8);let s=0;for(let i=0;i<d.length;i++)s+=d[i];return finishThumb(d,s/d.length);}
+function thumbToU8(t){const u=new Uint8Array(t.d.length);for(let i=0;i<u.length;i++)u[i]=Math.max(0,Math.min(255,Math.round(t.d[i])));return u;}
+// Block comparison of thumb `cur` against `ref` after matching ref's gain/offset to cur; best over +/-1px shifts.
+// changed: blocks whose mean abs diff > BLOCK_CHANGED; curDarker/curBrighter: direction of changed blocks; cb: block change map.
+function blockMeans(t){const m=new Float32Array(NB);for(let by=0;by<BY;by++)for(let bx=0;bx<BX;bx++){let s=0;for(let y=by*BH;y<by*BH+BH;y++)for(let x=bx*BW;x<bx*BW+BW;x++)s+=t.d[y*TW+x];m[by*BX+bx]=s/(BW*BH);}return m;}
+function median(a){const v=Array.from(a).sort((x,y)=>x-y);return v[v.length>>1];}
+function cmpThumbs(cur,ref){
+  // candidate explanations of a global exposure change: none, offset (median over blocks, robust to partial occluders), gain+offset
+  const gm=Math.min(1.4,Math.max(0.7,cur.std/ref.std));
+  const mc=blockMeans(cur),mr=blockMeans(ref);
+  const variants=[[1,0],[1,median(mc.map((v,i)=>v-mr[i]))]];
+  if(Math.abs(gm-1)>=0.02)variants.push([gm,median(mc.map((v,i)=>v-gm*mr[i]))]);
+  let best=null;
+  for(const [g,off] of variants){
+  for(const [dx,dy] of SHIFTS){
+    let changed=0,max=0,curDarker=0,curBrighter=0; const cb=new Uint8Array(NB);
+    for(let by=0;by<BY;by++)for(let bx=0;bx<BX;bx++){
+      let s=0,sg=0;
+      for(let y=by*BH;y<by*BH+BH;y++){ let yy=y+dy; if(yy<0)yy=0; else if(yy>=TH)yy=TH-1;
+        for(let x=bx*BW;x<bx*BW+BW;x++){ let xx=x+dx; if(xx<0)xx=0; else if(xx>=TW)xx=TW-1;
+          const diff=(ref.d[yy*TW+xx]*g+off)-cur.d[y*TW+x]; s+=Math.abs(diff); sg+=diff; } }
+      const bd=s/(BW*BH); if(bd>max)max=bd;
+      if(bd>BLOCK_CHANGED){changed++;cb[by*BX+bx]=1; if(sg>0)curDarker++; else curBrighter++;}
+    }
+    if(!best||changed<best.changed||(changed===best.changed&&max<best.max)) best={changed,max,curDarker,curBrighter,cb};
+  } }
+  best.meanDiff=Math.abs(cur.mean-ref.mean);
+  if(best.meanDiff>40&&cur.std<=13&&ref.std<=13) best.changed=NB; // two uniform slides (all-white vs all-black) differ only in brightness
+  return best;
+}
+// a tall column of changed blocks reaching the bottom edge looks like a person standing in front of the screen
+function occluderLike(cb){
+  for(let bx=0;bx<BX;bx++){let n=0;for(let by=BY-1;by>=0&&cb[by*BX+bx];by--)n++; if(n>=3)return true;}
+  return false;
+}
+// Classify a small change of the current frame against the last capture `ref`:
+//  'add'      content appeared in the slide's ink colour (build step)        -> replace the capture
+//  'back'     content disappeared (presenter stepped back one build)         -> keep the fuller capture
+//  'occlude'  a person-shaped dark region appeared                           -> ignore (slide already saved)
+//  'reveal'   a person-shaped region cleared                                 -> replace with the clean frame
+//  'mixed'    anything else                                                  -> treat as a possible new slide
+function classifyChange(c,ref){
+  if(c.changed<1)return 'none';
+  const light=ref.mean>128, occ=occluderLike(c.cb);
+  const inkAdded=light?c.curDarker>=0.8*c.changed:c.curBrighter>=0.8*c.changed;
+  const inkRemoved=light?c.curBrighter>=0.8*c.changed:c.curDarker>=0.8*c.changed;
+  if(occ&&inkAdded)return 'occlude';
+  if(occ&&inkRemoved)return 'reveal';
+  if(inkAdded)return 'add';
+  if(inkRemoved)return 'back';
+  return 'mixed';
+}
+function additive(c,ref){return classifyChange(c,ref)==='add';}
+function toGray(rgba,n){const g=new Uint8ClampedArray(n);for(let i=0,j=0;i<n;i++,j+=4)g[i]=(rgba[j]*77+rgba[j+1]*150+rgba[j+2]*29)>>8;return g;}
+function otsu(g){
+  const h=new Uint32Array(256);for(let i=0;i<g.length;i++)h[g[i]]++;
+  const n=g.length;let sum=0;for(let i=0;i<256;i++)sum+=i*h[i];
+  let sb=0,wb=0,max=0,thr=128;
+  for(let t=0;t<256;t++){wb+=h[t];if(!wb)continue;const wf=n-wb;if(!wf)break;sb+=t*h[t];
+    const mb=sb/wb,mf=(sum-sb)/wf,v=wb*wf*(mb-mf)*(mb-mf);if(v>max){max=v;thr=t;}}
+  return thr;
+}
+function polyArea(p){let a=0;for(let i=0;i<4;i++){const j=(i+1)%4;a+=p[i][0]*p[j][1]-p[j][0]*p[i][1];}return Math.abs(a)/2;}
+function bboxN(q){let x0=1,y0=1,x1=0,y1=0;for(const [x,y] of q){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}return [x0,y0,x1,y1];}
+function iou(a,b){const ix=Math.max(0,Math.min(a[2],b[2])-Math.max(a[0],b[0])),iy=Math.max(0,Math.min(a[3],b[3])-Math.max(a[1],b[1]));const i=ix*iy;const u=(a[2]-a[0])*(a[3]-a[1])+(b[2]-b[0])*(b[3]-b[1])-i;return u>0?i/u:0;}
+function containedIn(a,b,t){return a[0]>=b[0]-t&&a[1]>=b[1]-t&&a[2]<=b[2]+t&&a[3]<=b[3]+t;}
+function quadDist(a,b){let m=0;for(let i=0;i<4;i++)m=Math.max(m,Math.hypot(a[i][0]-b[i][0],a[i][1]-b[i][1]));return m;}
+
+// Rectified width/height ratio of a quad seen in perspective (Zhang & He, principal point at centre).
+function rectAspect(q,w,h){
+  const u0=w/2,v0=h/2;
+  const m1=[q[0][0],q[0][1],1],m2=[q[1][0],q[1][1],1],m3=[q[3][0],q[3][1],1],m4=[q[2][0],q[2][1],1];
+  const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+  const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+  const d2=dot(cross(m2,m4),m3),d3=dot(cross(m3,m4),m2); if(!d2||!d3)return 16/9;
+  const k2=dot(cross(m1,m4),m3)/d2,k3=dot(cross(m1,m4),m2)/d3;
+  const n2=[k2*m2[0]-m1[0],k2*m2[1]-m1[1],k2*m2[2]-m1[2]],n3=[k3*m3[0]-m1[0],k3*m3[1]-m1[1],k3*m3[2]-m1[2]];
+  const fb=0.8*Math.max(w,h); let f=fb;
+  if(Math.abs(n2[2]*n3[2])>1e-6){
+    const f2=-((n2[0]*n3[0]-(n2[0]*n3[2]+n2[2]*n3[0])*u0+n2[2]*n3[2]*u0*u0)+(n2[1]*n3[1]-(n2[1]*n3[2]+n2[2]*n3[1])*v0+n2[2]*n3[2]*v0*v0))/(n2[2]*n3[2]);
+    if(f2>0.09*fb*fb&&f2<25*fb*fb)f=Math.sqrt(f2);
+  }
+  const inv=n=>[(n[0]-u0*n[2])/f,(n[1]-v0*n[2])/f,n[2]];
+  const a=inv(n2),b=inv(n3);const r=Math.sqrt(dot(a,a)/dot(b,b));
+  return isFinite(r)&&r>0.5&&r<4?r:16/9;
+}
+function targetAspect(qpx,w,h){const v=$('aspectSel').value;return v==='auto'?rectAspect(qpx,w,h):parseFloat(v);}
+
+// Screen detection: Otsu threshold relative to the hall background -> 1px erosion -> connected components -> 4 extreme corners.
+const DB={w:0,h:0};
+function detBuffers(w,h){if(DB.w!==w||DB.h!==h){DB.w=w;DB.h=h;DB.mask=new Uint8Array(w*h);DB.er=new Uint8Array(w*h);DB.lab=new Int32Array(w*h);DB.stack=new Int32Array(w*h);}else{DB.lab.fill(0);}return DB;}
+function detectComponents(gray,w,h){
+  const n=w*h, ot=otsu(gray);
+  const border=[];for(let x=0;x<w;x+=2){border.push(gray[x],gray[(h-1)*w+x]);}for(let y=0;y<h;y+=2){border.push(gray[y*w],gray[y*w+w-1]);}
+  const below=border.filter(v=>v<ot);
+  if(below.length<0.2*border.length) return {comps:[{q:[[0,0],[1,0],[1,1],[0,1]],area:n,fill:1,bw:w,bh:h}],bg:0,ot,full:true}; // screen fills the frame
+  below.sort((a,b)=>a-b); const bg=below[below.length>>1];
+  if(ot<bg+20) return {comps:[],bg,ot,full:false};
+  const thr=Math.min(ot,Math.max(bg+20,bg+0.35*(ot-bg)));
+  const B=detBuffers(w,h),mask=B.mask,er=B.er,lab=B.lab,stack=B.stack;
+  for(let i=0;i<n;i++)mask[i]=gray[i]>thr?1:0;
+  er.fill(0);
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const i=y*w+x;er[i]=mask[i]&mask[i-1]&mask[i+1]&mask[i-w]&mask[i+w];}
+  const comps=[];let cur=0;
+  for(let s=0;s<n;s++){
+    if(!er[s]||lab[s])continue;cur++;let sp=0;stack[sp++]=s;lab[s]=cur;
+    let area=0,tl=1e9,tr=-1e9,br=-1e9,bl=1e9,ptl,ptr,pbr,pbl,minx=w,maxx=0,miny=h,maxy=0;
+    while(sp){const i=stack[--sp];area++;const x=i%w,y=(i-x)/w;
+      if(x+y<tl){tl=x+y;ptl=[x,y];} if(x-y>tr){tr=x-y;ptr=[x,y];} if(x+y>br){br=x+y;pbr=[x,y];} if(x-y<bl){bl=x-y;pbl=[x,y];}
+      if(x<minx)minx=x;if(x>maxx)maxx=x;if(y<miny)miny=y;if(y>maxy)maxy=y;
+      if(x>0&&er[i-1]&&!lab[i-1]){lab[i-1]=cur;stack[sp++]=i-1;}
+      if(x<w-1&&er[i+1]&&!lab[i+1]){lab[i+1]=cur;stack[sp++]=i+1;}
+      if(y>0&&er[i-w]&&!lab[i-w]){lab[i-w]=cur;stack[sp++]=i-w;}
+      if(y<h-1&&er[i+w]&&!lab[i+w]){lab[i+w]=cur;stack[sp++]=i+w;}
+    }
+    if(area<0.006*n)continue;
+    const bw=maxx-minx+1,bh=maxy-miny+1; if(bw<0.08*w||bh<0.05*h)continue;
+    // undo the erosion (1px) and convert pixel indices to edge coordinates
+    const fill=area/Math.max(1,polyArea([ptl,ptr,pbr,pbl])); if(fill<0.55||fill>1.25)continue; // not rectangle-like (dark text leaves holes, so be lenient)
+    let q=[[ptl[0]-1,ptl[1]-1],[ptr[0]+2,ptr[1]-1],[pbr[0]+2,pbr[1]+2],[pbl[0]-1,pbl[1]+2]];
+    q=refineEdges(q,gray,w,h,bg,ot);
+    comps.push({q:q.map(([x,y])=>[Math.min(1,Math.max(0,x/w)),Math.min(1,Math.max(0,y/h))]),area,fill,bw,bh});
+  }
+  comps.sort((a,b)=>b.area-a.area);
+  return {comps:comps.slice(0,5),bg,ot,full:false};
+}
+// A dark title/footer band on a light wall is excluded by the brightness mask; if the rectified aspect is clearly wider
+// than the chosen slide aspect, grow the top/bottom edge while the rows just outside still differ from the wall.
+function refineEdges(q,gray,w,h,bg,ot){
+  const sel=$('aspectSel').value; if(sel==='auto')return q;
+  const target=parseFloat(sel), r=rectAspect(q,w,h); if(!(r>target*1.12))return q;
+  const tNB=Math.max(15,0.25*(ot-bg));
+  const hgt=Math.max(1,(Math.hypot(q[3][0]-q[0][0],q[3][1]-q[0][1])+Math.hypot(q[2][0]-q[1][0],q[2][1]-q[1][1]))/2);
+  let need=Math.min(0.35*hgt,hgt*(r/target-1));
+  const nonBg=(p0,p1,s,dir)=>{let c=0;for(let i=0;i<24;i++){const t=(i+0.5)/24;const x=Math.round(p0[0]+(p1[0]-p0[0])*t),y=Math.round(p0[1]+(p1[1]-p0[1])*t+dir*s);if(x<0||x>=w||y<0||y>=h)continue;if(Math.abs(gray[y*w+x]-bg)>tNB)c++;}return c/24;};
+  const out=q.map(p=>p.slice());
+  const mix=(a,b,t)=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t];
+  // each end of the edge grows on its own (a title band is slanted by perspective)
+  const grow=(p0,p1,dir,lim)=>{let s=0;while(s<lim&&nonBg(p0,p1,s+1,dir)>=0.6)s++;return s;};
+  const sl=grow(q[0],mix(q[0],q[1],0.4),-1,need),sr=grow(mix(q[0],q[1],0.6),q[1],-1,need);
+  out[0][1]-=sl;out[1][1]-=sr;need-=Math.min(sl,sr);
+  const bl=grow(q[3],mix(q[3],q[2],0.4),1,need),br=grow(mix(q[3],q[2],0.6),q[2],1,need);
+  out[3][1]+=bl;out[2][1]+=br;
+  return out;
+}
+
+// ---------- frame grabbing ----------
+const small=document.createElement('canvas'),sctx=small.getContext('2d',{willReadFrequently:true});
+const full=document.createElement('canvas'),fctx=full.getContext('2d',{willReadFrequently:true});
+const oc=document.createElement('canvas'),occ=oc.getContext('2d');
+const tc=document.createElement('canvas'),tcc=tc.getContext('2d');
+function srcDims(){
+  if(S.source==='image')return S.img?[S.img.naturalWidth,S.img.naturalHeight]:[0,0];
+  return[video.videoWidth||0,video.videoHeight||0];
+}
+function drawSource(ctx,w,h){ctx.drawImage(S.source==='image'?S.img:video,0,0,w,h);}
+function grabSmall(){
+  const [vw,vh]=srcDims(); if(!vw||!vh)return null;
+  const w=DET_W,h=Math.max(8,Math.round(DET_W*vh/vw));
+  if(small.width!==w||small.height!==h){small.width=w;small.height=h;}
+  sctx.imageSmoothingEnabled=true;sctx.imageSmoothingQuality='high';
+  drawSource(sctx,w,h);
+  const d=sctx.getImageData(0,0,w,h).data;
+  return{gray:toGray(d,w*h),w,h};
+}
+
+// ---------- overlay ----------
+function fitOverlay(){
+  const r=overlay.getBoundingClientRect();
+  const dpr=Math.min(2,window.devicePixelRatio||1);
+  overlay.width=Math.round(r.width*dpr);overlay.height=Math.round(r.height*dpr);
+  octx.setTransform(dpr,0,0,dpr,0,0);
+}
+function contentRect(){ // displayed area of the video (object-fit: contain)
+  const r=overlay.getBoundingClientRect();const [vw,vh]=srcDims();
+  if(!vw||!vh)return{x:0,y:0,w:r.width,h:r.height};
+  const s=Math.min(r.width/vw,r.height/vh);const w=vw*s,h=vh*s;
+  return{x:(r.width-w)/2,y:(r.height-h)/2,w,h};
+}
+function drawOverlay(){
+  const r=overlay.getBoundingClientRect();octx.clearRect(0,0,r.width,r.height);
+  if(!S.quad)return;const c=contentRect();
+  const P=S.quad.map(([x,y])=>[c.x+x*c.w,c.y+y*c.h]);
+  octx.lineWidth=2;octx.strokeStyle=S.locked?'#ffb454':'#4cd17a';
+  octx.fillStyle=S.locked?'rgba(255,180,84,.12)':'rgba(76,209,122,.12)';
+  octx.beginPath();P.forEach((p,i)=>i?octx.lineTo(p[0],p[1]):octx.moveTo(p[0],p[1]));octx.closePath();octx.fill();octx.stroke();
+  P.forEach(p=>{octx.beginPath();octx.arc(p[0],p[1],11,0,Math.PI*2);octx.fillStyle='rgba(0,0,0,.5)';octx.fill();octx.lineWidth=2;octx.stroke();});
+}
+overlay.addEventListener('pointerdown',e=>{
+  if(!S.running&&S.source!=='image')return;
+  if(!S.quad){fallbackQuad('수동 영역을 만들었습니다. 모서리를 끌어 스크린에 맞춰 주세요');drawOverlay();}
+  const c=contentRect();const rect=overlay.getBoundingClientRect();
+  const px=e.clientX-rect.left,py=e.clientY-rect.top;let best=-1,bd=30;
+  S.quad.forEach(([x,y],i)=>{const d=Math.hypot(c.x+x*c.w-px,c.y+y*c.h-py);if(d<bd){bd=d;best=i;}});
+  if(best>=0){S.dragging=best;overlay.setPointerCapture(e.pointerId);}
+});
+overlay.addEventListener('pointermove',e=>{
+  if(S.dragging<0)return;const c=contentRect();const rect=overlay.getBoundingClientRect();
+  const x=Math.min(1,Math.max(0,(e.clientX-rect.left-c.x)/c.w)),y=Math.min(1,Math.max(0,(e.clientY-rect.top-c.y)/c.h));
+  S.quad[S.dragging]=[x,y];setLocked(true);drawOverlay();
+});
+overlay.addEventListener('pointerup',()=>{if(S.dragging>=0){S.dragging=-1;resetTracking();}});
+overlay.addEventListener('pointercancel',()=>{S.dragging=-1;});
+window.addEventListener('resize',()=>{fitOverlay();drawOverlay();});
+
+function setLocked(v){S.locked=v;$('btnLock').textContent=v?'🔒 영역 고정됨':'자동 영역';$('btnLock').classList.toggle('active',v);}
+$('btnLock').onclick=()=>{
+  if(S.locked){setLocked(false);S.quad=null;S.candidate=null;S.candCount=0;S.missCount=0;S.detRing=[];resetTracking();toast('스크린을 다시 찾습니다');}
+  else{ if(!S.quad)fallbackQuad('영역을 만들었습니다. 모서리를 끌어 맞춰 주세요'); setLocked(true); }
+  drawOverlay();
+};
+function fallbackQuad(msg){S.quad=[[.1,.1],[.9,.1],[.9,.9],[.1,.9]];setLocked(true);S.quadSince=performance.now();resetTracking();if(msg)toast(msg);}
+function resetTracking(){S.hist=[];S.stableCount=0;S.quadSince=performance.now();}
+
+// ---------- quad tracking ----------
+function pickComponent(comps){
+  if(!comps.length)return null;
+  if(S.quad){const qb=bboxN(S.quad);let best=null,bi=0;for(const c of comps){const v=iou(bboxN(c.q),qb);if(v>bi){bi=v;best=c;}}if(best&&bi>0.3)return best.q;}
+  return comps[0].q;
+}
+function adoptQuad(q){S.quad=q.map(p=>p.slice());S.candidate=null;S.candCount=0;S.detRing=[];resetTracking();}
+function ringIsBackground(f,oldQ,newQ,bg){
+  const ob=bboxN(oldQ),nb=bboxN(newQ);let s=0,c=0;
+  for(let y=Math.floor(ob[1]*f.h);y<ob[3]*f.h;y++)for(let x=Math.floor(ob[0]*f.w);x<ob[2]*f.w;x++){
+    const nx=x/f.w,ny=y/f.h;if(nx>=nb[0]&&nx<=nb[2]&&ny>=nb[1]&&ny<=nb[3])continue;s+=f.gray[y*f.w+x];c++;}
+  return c>0&&Math.abs(s/c-bg)<=8;
+}
+function medianQuad(ring){
+  return [0,1,2,3].map(i=>[0,1].map(j=>{const v=ring.map(q=>q[i][j]).sort((a,b)=>a-b);return v[v.length>>1];}));
+}
+function updateQuad(det,f,bg,now){
+  if(!det){S.missCount++; if(!S.quad&&S.missCount>=9)fallbackQuad('스크린을 자동으로 찾지 못해 영역을 고정했습니다. 모서리를 끌어 맞춰 주세요'); return;}
+  S.missCount=0;
+  if(!S.quad){adoptQuad(det);return;}
+  if(quadDist(det,S.quad)<0.03){ // tracking: temporal median then EMA
+    S.candidate=null;S.candCount=0;
+    S.detRing.push(det);if(S.detRing.length>5)S.detRing.shift();
+    const m=medianQuad(S.detRing);
+    for(let i=0;i<4;i++){S.quad[i][0]+=0.3*(m[i][0]-S.quad[i][0]);S.quad[i][1]+=0.3*(m[i][1]-S.quad[i][1]);}
+    return;
+  }
+  if(S.candidate&&quadDist(det,S.candidate)<0.03)S.candCount++;else{S.candidate=det;S.candCount=1;}
+  const db=bboxN(det),qb=bboxN(S.quad);
+  if(containedIn(db,qb,0.02)){ // smaller region inside the screen: usually slide content (dark theme), adopt only if the ring is hall background
+    if(S.candCount>=45&&ringIsBackground(f,S.quad,det,bg))adoptQuad(det);
+  }else{
+    const need=iou(db,qb)>0.3?3:15;
+    if(S.candCount>=need)adoptQuad(det);
+  }
+}
+
+// ---------- main loop ----------
+function tick(){
+  if(!S.running)return;
+  const f=grabSmall(); if(!f){schedule();return;}
+  const now=performance.now();
+  if(S.source==='camera')checkStale();
+  if(!S.locked){const r=detectComponents(f.gray,f.w,f.h);updateQuad(pickComponent(r.comps),f,r.bg,now);}
+  drawOverlay();
+  if(!S.quad){setStatus('warn','스크린을 찾는 중… 화면 전체가 보이게 비춰 주세요');schedule();return;}
+  const qpx=S.quad.map(([x,y])=>[x*f.w,y*f.h]);
+  const thumb=makeThumb(f.gray,f.w,f.h,qpx);
+  const prev=S.hist[S.hist.length-1];
+  const stable=prev?cmpThumbs(thumb,prev).max<STABLE_MAX:false;
+  S.hist.push(thumb);if(S.hist.length>8)S.hist.shift();
+  if(stable)S.stableCount++;else S.stableCount=0;
+  decide(thumb,now);
+  schedule();
+}
+let schedule=function(){clearTimeout(S.timer);S.timer=setTimeout(tick,S.source==='video'?200:330);};
+function cooldown(){
+  const base=S.source==='video'?500:1000;
+  const t=S.capTimes; if(t.length>=3&&t[t.length-1]-t[0]<8000)return 6000; // many captures in a row: embedded video or animation
+  return base;
+}
+function smallHint(){const b=bboxN(S.quad);return (b[2]-b[0])<0.15?' · 화면이 작습니다, 줌을 올리세요':'';}
+function decide(thumb,now){
+  if(S.capturing)return;
+  const need=parseInt($('stable').value,10),sens=parseInt($('sens').value,10),novelBlocks=Math.max(1,Math.round(sens/4));
+  const old=S.hist.length>need?S.hist[S.hist.length-1-need]:null;
+  const settled=S.stableCount>=need&&(!old||cmpThumbs(thumb,old).max<STABLE_MAX);
+  if(!settled){
+    if(S.unstableSince===null)S.unstableSince=now;
+    setStatus('warn',now-S.unstableSince>30000?'계속 움직임 감지 중(영상 재생·흔들림?) · 안정되면 저장합니다':`안정화 ${Math.min(S.stableCount,need)}/${need}`+smallHint());
+    return;
+  }
+  S.unstableSince=null;
+  const gateOk=now-S.quadSince>2000&&S.candCount===0;
+  const n=S.slides.length;
+  if(!n){ if(gateOk&&now-S.lastSaveAt>cooldown())capture(thumb,'auto'); else setStatus('ok','감시 중'+smallHint()); return; }
+  const last=S.slides[n-1];
+  const set=$('dedupe').checked?S.slides.slice(-60):[last];
+  let best=null;
+  for(const s of set){ if(!s.thumb)continue; const c=cmpThumbs(thumb,s.thumb); if(!best||c.changed<best.c.changed)best={s,c}; }
+  if(!best){ if(gateOk&&now-S.lastSaveAt>cooldown())capture(thumb,'auto'); return; }
+  if(best.c.changed<=REPLACE_MAX){
+    const kind=classifyChange(best.c,best.s.thumb);
+    if(kind==='back'||kind==='occlude'){setStatus('ok',`감시 중 · ${n}장 저장`+(kind==='occlude'?' · 화면 일부 가려짐':''));return;} // earlier build state / person in front of a saved slide
+    if(best.s===last&&(kind==='add'||kind==='reveal')){
+      if(gateOk&&now-S.lastSaveAt>2500&&now-S.lastReplaceAt>2500)replaceLast(thumb);
+      else setStatus('ok',kind==='add'?'내용 추가 감지 · 갱신 대기':'가림 해제 감지 · 갱신 대기');
+      return;
+    }
+  }
+  if(best.c.changed<novelBlocks){setStatus('ok',`감시 중 · ${n}장 저장`+smallHint());return;}
+  if(gateOk&&now-S.lastSaveAt>cooldown())capture(thumb,'auto');
+  else setStatus('warn',`새 슬라이드 감지 · 잠시 대기`);
+}
+function checkStale(){ // frozen camera stream (iOS after backgrounding): currentTime stops advancing
+  const t=video.currentTime;
+  if(t===S.lastVideoTime)S.staleTicks++;else S.staleTicks=0;
+  S.lastVideoTime=t;
+  if(S.staleTicks>=12&&!S.starting&&document.visibilityState==='visible'){S.staleTicks=0;toast('카메라 영상이 멈춰 다시 연결합니다');startCamera(true);}
+}
+
+// ---------- capture ----------
+async function renderSlide(){
+  const [vw,vh]=srcDims(); if(!vw||!vh)throw new Error('영상 없음');
+  const qpx=S.quad.map(([x,y])=>[x*vw,y*vh]);
+  const xs=qpx.map(p=>p[0]),ys=qpx.map(p=>p[1]);
+  const bx=Math.max(0,Math.floor(Math.min(...xs))-2),by=Math.max(0,Math.floor(Math.min(...ys))-2);
+  const bw=Math.min(vw,Math.ceil(Math.max(...xs))+3)-bx,bh=Math.min(vh,Math.ceil(Math.max(...ys))+3)-by;
+  if(bw<4||bh<4)throw new Error('영역이 너무 작습니다');
+  if(full.width!==vw||full.height!==vh){full.width=vw;full.height=vh;}
+  drawSource(fctx,vw,vh);
+  const src=fctx.getImageData(bx,by,bw,bh).data;
+  const q2=qpx.map(([x,y])=>[x-bx,y-by]);
+  const ow=parseInt($('outW').value,10),oh=Math.max(16,Math.round(ow/targetAspect(qpx,vw,vh)));
+  const out=warpRGBA(src,bw,bh,q2,ow,oh);
+  if(oc.width!==ow||oc.height!==oh){oc.width=ow;oc.height=oh;}
+  occ.putImageData(new ImageData(out,ow,oh),0,0);
+  const blob=await toBlob(oc,'image/jpeg',0.88); if(!blob)throw new Error('이미지 인코딩 실패');
+  const tw=320,th=Math.max(8,Math.round(320*oh/ow));
+  if(tc.width!==tw||tc.height!==th){tc.width=tw;tc.height=th;}
+  tcc.drawImage(oc,0,0,tw,th);
+  const thumbBlob=(await toBlob(tc,'image/jpeg',0.72))||blob;
+  return {blob,thumbBlob,w:ow,h:oh};
+}
+function curThumb(){const f=grabSmall();if(!f)return null;return makeThumb(f.gray,f.w,f.h,S.quad.map(([x,y])=>[x*f.w,y*f.h]));}
+function toRecord(s){const r={ts:s.ts,src:s.src,mode:s.mode,blob:s.blob,thumbBlob:s.thumbBlob,thumb:s.thumb?thumbToU8(s.thumb):null,ocr:s.ocr,w:s.w,h:s.h,recSession:s.recSession,recOffset:s.recOffset};if(s.id!=null&&!s.unsaved)r.id=s.id;return r;} // never send id:undefined (breaks the key generator)
+function showPreview(){
+  previewC.width=320;previewC.height=Math.round(320*oc.height/oc.width);pctx.drawImage(oc,0,0,previewC.width,previewC.height);
+  previewC.classList.add('show');clearTimeout(previewC._t);previewC._t=setTimeout(()=>previewC.classList.remove('show'),2500);
+  $('flash').classList.add('on');setTimeout(()=>$('flash').classList.remove('on'),30);
+}
+let capture=async function(thumb,mode){
+  if(S.capturing||!S.quad)return; S.capturing=true;
+  const now=performance.now(); S.lastSaveAt=now; S.capTimes.push(now); if(S.capTimes.length>3)S.capTimes.shift(); S.stableCount=0;
+  try{
+    if(!thumb)thumb=curThumb();
+    const r=await renderSlide();
+    const slide={ts:S.source==='video'?Math.round(video.currentTime*1000):Date.now(),src:S.source==='video'?'video':(S.source==='image'?'photo':'camera'),
+      mode,blob:r.blob,thumbBlob:r.thumbBlob,thumb,w:r.w,h:r.h,ocr:'',recSession:S.recStart||null,recOffset:S.recStart?Date.now()-S.recStart:null};
+    try{slide.id=await dbPut('slides',toRecord(slide));}
+    catch(e){slide.id=S.tempId--;slide.unsaved=true;toast('저장소 오류: 이 슬라이드는 메모리에만 있습니다. 곧 ZIP으로 내려받으세요. ('+e.message+')');}
+    slide.url=URL.createObjectURL(slide.thumbBlob);
+    S.slides.push(slide);addTile(slide);invalidateZip();showPreview();
+    setStatus('ok',`저장됨 · ${S.slides.length}장`);
+    if($('ocrOn').checked)queueOcr(slide);
+    if(S.slides.length===1)navigator.storage?.persist?.().catch(()=>{});
+  }catch(e){console.warn(e);toast('캡처 실패: '+e.message);}
+  S.capturing=false;
+}
+let replaceLast=async function(thumb){ // same slide with more content (build step): overwrite the last capture
+  const last=S.slides[S.slides.length-1]; if(!last||S.capturing)return; S.capturing=true;
+  const now=performance.now(); S.lastReplaceAt=now; S.stableCount=0;
+  try{
+    const r=await renderSlide();
+    if(S.slides[S.slides.length-1]!==last)throw new Error('skip');
+    URL.revokeObjectURL(last.url);
+    Object.assign(last,{blob:r.blob,thumbBlob:r.thumbBlob,thumb,w:r.w,h:r.h,ocr:''});
+    last.url=URL.createObjectURL(last.thumbBlob);
+    if(!last.unsaved){try{await dbPut('slides',toRecord(last));}catch(e){last.unsaved=true;}}
+    updateTile(last);invalidateZip();showPreview();setStatus('ok',`슬라이드 ${S.slides.length} 갱신(내용 추가)`);
+    if($('ocrOn').checked)queueOcr(last);
+  }catch(e){if(e.message!=='skip'){console.warn(e);toast('갱신 실패: '+e.message);}}
+  S.capturing=false;
+}
+$('btnShot').onclick=()=>{if(!S.quad){toast('먼저 영역을 지정하세요(화면을 탭)');return;}capture(null,'manual');};
+
+// ---------- camera ----------
+async function listCams(){
+  try{const devs=await navigator.mediaDevices.enumerateDevices();const sel=$('camSel');
+    const cur=sel.value;sel.innerHTML='<option value="">후면(기본)</option>';
+    devs.filter(d=>d.kind==='videoinput'&&d.deviceId).forEach((d,i)=>{const o=document.createElement('option');o.value=d.deviceId;o.textContent=d.label||`카메라 ${i+1}`;sel.appendChild(o);});
+    sel.value=cur;}catch(e){}
+}
+function requestWake(){ // must be called synchronously inside a user gesture on iOS
+  if(!('wakeLock' in navigator))return;
+  try{navigator.wakeLock.request('screen').then(s=>{S.wakeLock=s;s.addEventListener('release',()=>{S.wakeLock=null;updWake();});updWake();}).catch(()=>{S.wakeLock=null;updWake();});}
+  catch(e){updWake();}
+}
+function updWake(){$('wake').classList.toggle('show',S.running&&!S.wakeLock);}
+document.addEventListener('pointerdown',()=>{if(S.running&&!S.wakeLock)requestWake();},{passive:true});
+async function startCamera(keepQuad){
+  if(S.starting)return; S.starting=true; $('btnStart').disabled=true;
+  if(!navigator.mediaDevices?.getUserMedia){toast('이 브라우저는 카메라 접근을 지원하지 않습니다. HTTPS 주소로 열었는지 확인하세요.');S.starting=false;$('btnStart').disabled=false;return;}
+  const savedQuad=keepQuad?S.quad:null, savedLock=S.locked;
+  stopAll(true);
+  const id=$('camSel').value;
+  const c={audio:false,video:{width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30}}};
+  if(id)c.video.deviceId={exact:id};else c.video.facingMode={ideal:'environment'};
+  try{S.stream=await navigator.mediaDevices.getUserMedia(c);}
+  catch(e){toast('카메라를 열 수 없습니다: '+e.message);S.starting=false;$('btnStart').disabled=false;setStatus('bad','카메라 없음');return;}
+  S.source='camera';S.img=null;video.onended=null;video.srcObject=S.stream;
+  try{await video.play();}catch(e){}
+  if(!video.videoWidth)await new Promise(r=>{const t=setTimeout(r,4000);video.onloadedmetadata=()=>{clearTimeout(t);r();};});
+  const track=S.stream.getVideoTracks()[0];
+  track.addEventListener('ended',()=>{if(S.running&&S.source==='camera'&&S.stream?.getVideoTracks()[0]===track){setStatus('bad','카메라 연결 끊김');if(document.visibilityState==='visible')startCamera(true);}});
+  onSourceReady();
+  if(savedQuad){S.quad=savedQuad;setLocked(savedLock);resetTracking();drawOverlay();}
+  setupCamControls(track);listCams();
+  S.starting=false;$('btnStart').disabled=false;
+  $('btnStart').textContent='■ 중지';$('btnStart').classList.remove('primary');
+  if(!S.wakeLock)requestWake();updWake();
+}
+function setupCamControls(track){
+  const cap=track.getCapabilities?.()||{},st=track.getSettings?.()||{};
+  const z=$('zoom'),e=$('exp');let any=false;
+  if(cap.zoom&&cap.zoom.max>cap.zoom.min){any=true;$('zoomL').hidden=false;z.min=cap.zoom.min;z.max=cap.zoom.max;z.step=cap.zoom.step||0.1;z.value=st.zoom||cap.zoom.min;$('zoomV').textContent=(+z.value).toFixed(1)+'×';
+    z.oninput=()=>{$('zoomV').textContent=(+z.value).toFixed(1)+'×';track.applyConstraints({advanced:[{zoom:+z.value}]}).catch(()=>{});};}
+  else $('zoomL').hidden=true;
+  if(cap.exposureCompensation&&cap.exposureCompensation.max>cap.exposureCompensation.min){any=true;$('expL').hidden=false;const ec=cap.exposureCompensation;e.min=ec.min;e.max=ec.max;e.step=ec.step||0.5;
+    const init=Math.max(ec.min,Math.min(ec.max,-1));e.value=st.exposureCompensation??init;$('expV').textContent=(+e.value).toFixed(1);
+    e.oninput=()=>{$('expV').textContent=(+e.value).toFixed(1);track.applyConstraints({advanced:[{exposureCompensation:+e.value}]}).catch(()=>{});};
+    if(st.exposureCompensation===undefined||st.exposureCompensation===0)track.applyConstraints({advanced:[{exposureCompensation:init}]}).then(()=>{e.value=init;$('expV').textContent=init.toFixed(1);}).catch(()=>{});} // projector screens over-expose: start slightly darker
+  else $('expL').hidden=true;
+  if(Array.isArray(cap.focusMode)&&cap.focusMode.includes('continuous'))track.applyConstraints({advanced:[{focusMode:'continuous'}]}).catch(()=>{});
+  $('camCtl').classList.toggle('show',any);
+}
+function onSourceReady(){
+  const [vw,vh]=srcDims();$('stage').classList.toggle('portrait',vh>vw);
+  fitOverlay();S.quad=null;S.candidate=null;S.candCount=0;S.missCount=0;S.detRing=[];S.lastVideoTime=-1;S.staleTicks=0;setLocked(false);resetTracking();
+  S.running=true;$('btnShot').disabled=false;$('btnLock').disabled=false;clearTimeout(S.timer);tick();
+}
+function stopAll(silent){
+  S.running=false;clearTimeout(S.timer);S.capturing=false;
+  if(S.stream){S.stream.getTracks().forEach(t=>t.stop());S.stream=null;}
+  video.onended=null;video.onerror=null;video.srcObject=null;
+  if(video.src){URL.revokeObjectURL(video.src);video.removeAttribute('src');video.load();}
+  S.img=null;S.source='camera';$('btnShot').disabled=true;$('btnLock').disabled=true;$('camCtl').classList.remove('show');
+  try{S.wakeLock?.release();}catch(e){}S.wakeLock=null;updWake();
+  $('btnStart').textContent='📷 카메라 시작';$('btnStart').classList.add('primary');
+  if(!silent)setStatus('','대기 중');
+}
+$('btnStart').onclick=()=>{ if(S.running&&S.source==='camera'){stopAll();return;} requestWake(); startCamera(false); };
+$('camSel').onchange=()=>{if(S.running&&S.source==='camera')startCamera(true);};
+video.addEventListener('resize',()=>{ // orientation change swaps the stream's width/height
+  if(!S.running||S.source!=='camera')return;
+  const [vw,vh]=srcDims();const portrait=vh>vw;
+  if($('stage').classList.contains('portrait')!==portrait){$('stage').classList.toggle('portrait',portrait);fitOverlay();S.quad=null;setLocked(false);S.candidate=null;S.candCount=0;S.detRing=[];resetTracking();drawOverlay();toast('화면 방향이 바뀌어 스크린을 다시 찾습니다');}
+});
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='hidden'){S.hiddenAt=Date.now();return;}
+  if(!S.running||S.source!=='camera')return;
+  const t=S.stream?.getVideoTracks()[0];
+  if(!t||t.readyState==='ended'||t.muted||Date.now()-S.hiddenAt>1500){toast('카메라 다시 연결 중…');startCamera(true);}
+  else if(!S.wakeLock)requestWake();
+});
+
+// ---------- file sources (recorded video / photos) ----------
+$('fileIn').onchange=async e=>{
+  const files=[...e.target.files];if(!files.length)return;e.target.value='';
+  const vid=files.find(f=>f.type.startsWith('video/'));
+  if(vid){stopAll(true);S.source='video';video.srcObject=null;video.src=URL.createObjectURL(vid);video.muted=true;video.playbackRate=2;
+    const ok=await new Promise(r=>{video.onloadedmetadata=()=>r(true);video.onerror=()=>r(false);});
+    if(!ok){toast('이 영상 형식은 브라우저가 재생하지 못합니다(HEVC 등). 다른 형식으로 변환해 주세요.');stopAll();return;}
+    try{await video.play();}catch(e){}
+    onSourceReady();
+    video.onended=()=>{S.running=false;toast(`영상 처리 완료 · ${S.slides.length}장`);setStatus('ok','영상 처리 완료');};
+    video.onerror=()=>{S.running=false;toast('영상 재생 오류');};
+    toast('영상을 2배속으로 훑으며 슬라이드를 추출합니다'); return;}
+  const imgs=files.filter(f=>f.type.startsWith('image/'));let done=0;
+  for(const f of imgs){try{await processImageBlob(f);done++;}catch(err){toast(`${f.name}: 열 수 없습니다(${err.message})`);}}
+  toast(`${done}/${imgs.length}장 처리 완료`);
+};
+async function processImageBlob(blob){
+  stopAll(true);const img=new Image();const u=URL.createObjectURL(blob);img.src=u;
+  try{await img.decode();}catch(e){URL.revokeObjectURL(u);throw new Error('지원하지 않는 이미지');}
+  S.source='image';S.img=img;const f=grabSmall();const r=detectComponents(f.gray,f.w,f.h);
+  S.quad=r.comps.length?r.comps[0].q.map(p=>p.slice()):[[0,0],[1,0],[1,1],[0,1]];setLocked(true);fitOverlay();drawOverlay();
+  const [vw,vh]=srcDims();$('stage').classList.toggle('portrait',vh>vw);
+  await capture(null,r.comps.length?'photo':'photo-nodetect');URL.revokeObjectURL(u);
+}
+window.__processImageURL=async u=>{const b=await (await fetch(u)).blob();await processImageBlob(b);return S.quad;}; // debug hook
+
+// ---------- storage ----------
+let dbp;function db(){return dbp||(dbp=new Promise((res,rej)=>{const r=indexedDB.open('slidecap',2);
+  r.onupgradeneeded=()=>{const d=r.result;if(!d.objectStoreNames.contains('slides'))d.createObjectStore('slides',{keyPath:'id',autoIncrement:true});
+    if(!d.objectStoreNames.contains('transcript'))d.createObjectStore('transcript',{keyPath:'id',autoIncrement:true});
+    if(!d.objectStoreNames.contains('audio'))d.createObjectStore('audio',{keyPath:'id',autoIncrement:true});};
+  r.onsuccess=()=>res(r.result);r.onerror=()=>{dbp=null;rej(r.error||new Error('IndexedDB 열기 실패'));};r.onblocked=()=>{dbp=null;rej(new Error('IndexedDB blocked'));};}));}
+function tx(store,mode,fn){return db().then(d=>new Promise((res,rej)=>{const t=d.transaction(store,mode);const q=fn(t.objectStore(store));q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error||new Error('DB 오류'));}));}
+const dbPut=(s,o)=>tx(s,'readwrite',st=>st.put(o)), dbAll=s=>tx(s,'readonly',st=>st.getAll()), dbDel=(s,id)=>tx(s,'readwrite',st=>st.delete(id)), dbClear=s=>tx(s,'readwrite',st=>st.clear());
+async function restore(){
+  try{
+    const recs=await dbAll('slides');const frag=document.createDocumentFragment();
+    for(const r of recs){ try{
+      if(!r.blob)continue;
+      const s={id:r.id,ts:r.ts,src:r.src||'camera',mode:r.mode,blob:r.blob,thumbBlob:r.thumbBlob||r.blob,thumb:r.thumb?thumbFromU8(r.thumb):null,ocr:r.ocr||'',w:r.w,h:r.h,recSession:r.recSession||null,recOffset:r.recOffset??null};
+      s.url=URL.createObjectURL(s.thumbBlob);S.slides.push(s);frag.appendChild(makeTile(s));
+    }catch(e){console.warn('restore item',e);} }
+    $('grid').appendChild(frag);renumber();
+    S.transcript=(await dbAll('transcript')).filter(t=>t&&t.text);renderTranscript();
+    if($('ocrOn').checked)S.slides.filter(s=>!s.ocr).forEach(queueOcr);
+  }catch(e){console.warn(e);toast('이전 저장 내용을 불러오지 못했습니다: '+e.message);}
+}
+
+// ---------- gallery (incremental) ----------
+const tiles=new Map();
+function makeTile(s){
+  const d=document.createElement('div');d.className='slide';
+  d.innerHTML='<img alt="" loading="lazy"><span class="n"></span><button class="x" aria-label="삭제">×</button><span class="ocr" hidden>T</span><span class="u" hidden>미저장</span>';
+  d.querySelector('img').onclick=()=>openViewer(s);
+  d.querySelector('.x').onclick=()=>deleteSlide(s);
+  tiles.set(s.id,d);updateTileEl(d,s);return d;
+}
+function updateTileEl(d,s){const img=d.querySelector('img');if(img.getAttribute('src')!==s.url)img.src=s.url;d.querySelector('.ocr').hidden=!s.ocr;d.querySelector('.u').hidden=!s.unsaved;}
+function updateTile(s){const d=tiles.get(s.id);if(d)updateTileEl(d,s);}
+function addTile(s){$('grid').appendChild(makeTile(s));renumber();}
+function renumber(){S.slides.forEach((s,i)=>{const d=tiles.get(s.id);if(d)d.querySelector('.n').textContent=i+1;});$('count').textContent=S.slides.length;$('empty').hidden=S.slides.length>0;}
+async function deleteSlide(s){
+  S.slides=S.slides.filter(x=>x!==s);S.ocrQueue=S.ocrQueue.filter(x=>x!==s);
+  const d=tiles.get(s.id);if(d){d.remove();tiles.delete(s.id);}
+  URL.revokeObjectURL(s.url);renumber();invalidateZip();closeViewer();
+  if(!s.unsaved){try{await dbDel('slides',s.id);}catch(e){toast('삭제 실패: '+e.message);}}
+}
+let viewing=null,viewUrl=null;
+function openViewer(s){viewing=s;if(viewUrl)URL.revokeObjectURL(viewUrl);viewUrl=URL.createObjectURL(s.blob);$('viewerImg').src=viewUrl;$('viewerTxt').textContent=slideText(s)||'(텍스트 없음)';$('viewer').classList.add('show');}
+function closeViewer(){$('viewer').classList.remove('show');if(viewUrl){URL.revokeObjectURL(viewUrl);viewUrl=null;}viewing=null;}
+$('viewerClose').onclick=closeViewer;
+$('viewerDel').onclick=()=>viewing&&deleteSlide(viewing);
+$('btnClear').onclick=()=>$('clearConfirm').classList.add('show');
+$('btnClearNo').onclick=()=>$('clearConfirm').classList.remove('show');
+$('btnClearYes').onclick=async()=>{
+  if(S.rec)stopRec();
+  S.ocrQueue=[];S.slides.forEach(s=>URL.revokeObjectURL(s.url));S.slides=[];tiles.forEach(d=>d.remove());tiles.clear();S.transcript=[];renumber();renderTranscript();invalidateZip();closeViewer();
+  try{await dbClear('slides');await dbClear('transcript');await dbClear('audio');}catch(e){toast('저장소 비우기 실패: '+e.message);}
+  $('clearConfirm').classList.remove('show');toast('모두 삭제했습니다');
+};
+
+// ---------- export ----------
+function slideText(s){
+  const said=S.transcript.filter(t=>t.slideId===s.id).map(t=>t.text).join(' ');
+  let out='';if(s.ocr)out+=`[슬라이드 텍스트]\n${s.ocr.trim()}\n`;if(said)out+=`\n[발표 내용]\n${said}\n`;
+  if(s.recOffset!=null)out+=`\n[녹음 위치] ${mmss(s.recOffset)}`;return out;
+}
+function recName(session,sessions,ext){return `rec_${pad(sessions.indexOf(session)+1)}_${fileStamp(new Date(session))}.${ext}`;}
+function buildNotes(sessions){
+  const lines=[`# SlideCap 기록 ${new Date().toLocaleString()}`,''];
+  S.slides.forEach((s,i)=>{const name=`slide_${pad3(i+1)}.jpg`;
+    let head=`## ${i+1}. ${slideTime(s)}`;
+    if(s.recSession&&s.recOffset!=null&&sessions)head+=` · 녹음 ${recName(s.recSession,sessions,'*')} ${mmss(s.recOffset)}`;
+    lines.push(head,`![${name}](slides/${name})`,'');
+    if(s.ocr)lines.push('### 슬라이드 텍스트',s.ocr.trim(),'');
+    const said=S.transcript.filter(t=>t.slideId===s.id).map(t=>t.text).join(' ');
+    if(said)lines.push('### 발표 내용(실시간 자막)',said,'');});
+  const orphan=S.transcript.filter(t=>!S.slides.some(s=>s.id===t.slideId)).map(t=>t.text).join(' ');
+  if(orphan)lines.push('## 슬라이드 없이 기록된 자막',orphan,'');
+  return lines.join('\n');
+}
+function invalidateZip(){S.zipFile=null;S.shareIdx=0;$('btnZip').textContent='⬇ ZIP 만들기';$('btnShare').textContent='사진 앱으로 공유';}
+function downloadFile(f){const a=document.createElement('a');a.href=URL.createObjectURL(f);a.download=f.name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},5000);toast('다운로드 폴더에 저장합니다: '+f.name);}
+$('btnZip').onclick=async()=>{
+  const btn=$('btnZip');
+  if(S.zipFile){ // second tap: hand the prepared file over synchronously (share needs the tap's activation)
+    const f=S.zipFile;
+    if(!isAndroid&&navigator.canShare&&navigator.canShare({files:[f]})){navigator.share({files:[f],title:f.name}).catch(e=>{if(e.name!=='AbortError')downloadFile(f);});}
+    else downloadFile(f);
+    return;
+  }
+  if(!S.slides.length)return toast('저장된 슬라이드가 없습니다');
+  if(!window.JSZip)return toast('ZIP 라이브러리를 불러오지 못했습니다(인터넷에서 한 번 열면 캐시됩니다). 사진 공유를 이용하세요.');
+  btn.disabled=true;btn.textContent='ZIP 만드는 중…';
+  try{
+    const z=new JSZip();const sf=z.folder('slides');
+    S.slides.forEach((s,i)=>sf.file(`slide_${pad3(i+1)}.jpg`,s.blob));
+    let chunks=[];try{chunks=await dbAll('audio');}catch(e){}
+    const sessions=[...new Set(chunks.map(c=>c.session))].sort((a,b)=>a-b);
+    if(sessions.length){const af=z.folder('audio');
+      for(const sess of sessions){const cs=chunks.filter(c=>c.session===sess).sort((a,b)=>a.idx-b.idx);const mime=cs[0].mime||'';const ext=/mp4|aac|m4a/.test(mime)?'m4a':(/ogg/.test(mime)?'ogg':'webm');
+        af.file(recName(sess,sessions,ext),new Blob(cs.map(c=>c.blob),{type:mime}));}
+    }
+    z.file('slides.txt',S.slides.map((s,i)=>`===== 슬라이드 ${i+1} (${slideTime(s)}) =====\n${s.ocr.trim()}`).join('\n\n'));
+    z.file('transcript.txt',S.transcript.map(t=>`[${stamp(new Date(t.t))}] (슬라이드 ${S.slides.findIndex(s=>s.id===t.slideId)+1||'-'}) ${t.text}`).join('\n'));
+    z.file('timeline.txt',S.slides.map((s,i)=>`slide_${pad3(i+1)}.jpg\t${slideTime(s)}\t${s.recSession&&s.recOffset!=null?recName(s.recSession,sessions,'*')+' '+mmss(s.recOffset):''}`).join('\n'));
+    z.file('notes.md',buildNotes(sessions));
+    const blob=await z.generateAsync({type:'blob',compression:'STORE'},m=>{btn.textContent=`ZIP ${m.percent|0}%`;});
+    const name=`slidecap_${fileStamp()}.zip`;S.zipFile=new File([blob],name,{type:'application/zip'});
+    btn.textContent=`⬇ ZIP 저장/공유 (${(blob.size/1048576).toFixed(1)} MB)`;toast('ZIP 준비 완료. 버튼을 한 번 더 눌러 저장하세요.');
+  }catch(e){toast('ZIP 실패: '+e.message);btn.textContent='⬇ ZIP 만들기';}
+  btn.disabled=false;
+};
+$('btnShare').onclick=()=>{
+  if(!S.slides.length)return toast('저장된 슬라이드가 없습니다');
+  const files=S.slides.map((s,i)=>new File([s.blob],`slide_${pad3(i+1)}.jpg`,{type:'image/jpeg'}));
+  if(!(navigator.canShare&&navigator.canShare({files:[files[0]]}))){toast('이 브라우저는 파일 공유를 지원하지 않습니다. ZIP을 이용하세요.');return;}
+  const batch=isAndroid?10:files.length; // Android Chrome shares at most 10 files per call
+  const start=S.shareIdx>=files.length?0:S.shareIdx;const part=files.slice(start,start+batch);
+  navigator.share({files:part,title:'SlideCap 슬라이드'}).then(()=>{
+    S.shareIdx=start+batch;
+    if(S.shareIdx>=files.length){S.shareIdx=0;$('btnShare').textContent='사진 앱으로 공유';toast('모두 공유했습니다');}
+    else{$('btnShare').textContent=`다음 ${S.shareIdx+1}–${Math.min(files.length,S.shareIdx+batch)}장 공유`;toast(`${start+1}–${start+part.length}장 공유함. 버튼을 다시 눌러 계속하세요`);}
+  }).catch(e=>{if(e.name!=='AbortError')toast('공유 실패: '+e.message+' — ZIP을 이용하세요');});
+};
+$('btnCopy').onclick=async()=>{const t=buildNotes(null);try{await navigator.clipboard.writeText(t);toast('텍스트를 복사했습니다');}catch(e){const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');toast('텍스트를 복사했습니다');}catch(e2){toast('복사 실패');}ta.remove();}};
+
+// ---------- OCR (tesseract.js, on-device) ----------
+async function getOcr(){
+  const lang=$('ocrLang').value;
+  if(S.ocrWorker&&(S.ocrLang!==lang||S.ocrCount>=15)){const w=S.ocrWorker;S.ocrWorker=null;try{await w.terminate();}catch(e){}} // recreate: language change or wasm heap growth
+  if(S.ocrWorker)return S.ocrWorker;
+  if(!window.Tesseract)throw new Error('OCR 라이브러리를 불러오지 못했습니다(인터넷 필요)');
+  setStatus('warn','OCR 준비 중(처음 한 번 약 9MB 내려받음)…');
+  S.ocrWorker=await Tesseract.createWorker(lang,1,{});S.ocrLang=lang;S.ocrCount=0;
+  return S.ocrWorker;
+}
+function queueOcr(s){if(!S.ocrQueue.includes(s))S.ocrQueue.push(s);runOcr();}
+async function runOcr(){
+  if(S.ocrBusy||!S.ocrQueue.length)return;S.ocrBusy=true;
+  const s=S.ocrQueue.shift();
+  if(S.slides.includes(s)){
+    try{const w=await getOcr();const blob=s.blob;const {data}=await w.recognize(blob);S.ocrCount++;
+      if(S.slides.includes(s)&&s.blob===blob){s.ocr=(data.text||'').replace(/\n{3,}/g,'\n\n');
+        if(!s.unsaved){try{await dbPut('slides',toRecord(s));}catch(e){}}updateTile(s);}}
+    catch(e){console.warn('OCR',e);toast('OCR 실패: '+e.message+' — OCR을 끕니다');$('ocrOn').checked=false;S.ocrQueue=[];}
+  }
+  S.ocrBusy=false;runOcr();
+}
+$('ocrOn').onchange=()=>{if($('ocrOn').checked)S.slides.filter(s=>!s.ocr).forEach(queueOcr);};
+
+// ---------- audio recording (silent; chunks saved every 10 s) ----------
+let recTimer=null;
+async function startRec(){
+  if(!window.MediaRecorder){toast('이 브라우저는 녹음을 지원하지 않습니다');return;}
+  try{S.audioStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:true}});}
+  catch(e){toast('마이크를 열 수 없습니다: '+e.message);return;}
+  const mime=['audio/webm;codecs=opus','audio/webm','audio/mp4;codecs=mp4a.40.2','audio/mp4','audio/ogg;codecs=opus'].find(m=>MediaRecorder.isTypeSupported(m))||'';
+  let rec;try{rec=new MediaRecorder(S.audioStream,mime?{mimeType:mime,audioBitsPerSecond:48000}:{audioBitsPerSecond:48000});}
+  catch(e){toast('녹음기 생성 실패: '+e.message);S.audioStream.getTracks().forEach(t=>t.stop());S.audioStream=null;return;}
+  S.rec=rec;S.recStart=Date.now();S.recIdx=0;S.recBytes=0;
+  rec.ondataavailable=e=>{if(e.data&&e.data.size){const chunk={session:S.recStart,idx:S.recIdx++,blob:e.data,mime:rec.mimeType||mime,t:Date.now()};S.recBytes+=e.data.size;dbPut('audio',chunk).catch(err=>toast('녹음 저장 실패: '+err.message));}};
+  rec.onerror=e=>toast('녹음 오류: '+(e.error?.message||'unknown'));
+  rec.start(10000);
+  $('btnRec').textContent='⏹ 녹음 중지';$('btnRec').classList.add('rec');
+  recTimer=setInterval(()=>{$('recState').textContent=`⏺ ${mmss(Date.now()-S.recStart)} 녹음 중 · ${(S.recBytes/1048576).toFixed(1)}MB`;},1000);
+  toast('녹음을 시작했습니다(무음). 슬라이드마다 녹음 위치가 기록됩니다.');
+}
+function stopRec(){
+  try{S.rec?.stop();}catch(e){}
+  S.audioStream?.getTracks().forEach(t=>t.stop());
+  S.rec=null;S.audioStream=null;const dur=S.recStart?Date.now()-S.recStart:0;S.recStart=null;clearInterval(recTimer);
+  $('recState').textContent=dur?`녹음 ${mmss(dur)} 저장됨(ZIP에 포함)`:'';
+  $('btnRec').textContent='⏺ 녹음';$('btnRec').classList.remove('rec');invalidateZip();
+}
+$('btnRec').onclick=()=>S.rec?stopRec():startRec();
+
+// ---------- live speech (optional) ----------
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let interim='';
+function renderTranscript(){
+  const el=$('transcript');if(!S.transcript.length&&!interim){el.innerHTML='<span class="muted">⏺ 녹음은 소리 없이 발표 음성을 저장하고, 슬라이드마다 녹음 시각을 함께 기록합니다(ZIP에 포함). 실시간 자막은 인터넷이 필요하고 갤럭시에서는 시작할 때마다 알림음이 나므로 무음 모드로 두세요. 아이패드 홈 화면 앱에서는 실시간 자막이 동작하지 않습니다(Safari 탭에서는 가능).</span>';return;}
+  el.innerHTML=S.transcript.slice(-80).map(t=>`<b>${stamp(new Date(t.t))}</b> ${esc(t.text)}`).join('\n')+(interim?`\n<span class="interim">${esc(interim)}</span>`:'');
+  el.scrollTop=el.scrollHeight;
+}
+function curSlideId(){return S.slides.length?S.slides[S.slides.length-1].id:null;}
+function spawnSR(){
+  if(!S.speechOn)return;
+  const r=new SR();r.lang=$('spLang').value;r.continuous=true;r.interimResults=true;r.maxAlternatives=1;
+  const startedAt=Date.now();let got=false;
+  r.onresult=e=>{got=true;S.spFail=0;S.spLast=Date.now();interim='';
+    for(let i=e.resultIndex;i<e.results.length;i++){const res=e.results[i];const txt=res[0].transcript.trim();if(!txt)continue;
+      if(res.isFinal){const ent={t:Date.now(),slideId:curSlideId(),text:txt};S.transcript.push(ent);dbPut('transcript',ent).then(id=>ent.id=id).catch(()=>{});}
+      else interim+=txt+' ';}
+    renderTranscript();};
+  r.onerror=e=>{if(['not-allowed','service-not-allowed','audio-capture','language-not-supported'].includes(e.error)){S.speechOn=false;updSpeechBtn();toast('실시간 자막을 쓸 수 없습니다('+e.error+'). 녹음을 이용하세요.');}};
+  r.onend=()=>{
+    if(S.sr!==r)return;S.sr=null;interim='';renderTranscript();
+    if(!S.speechOn)return;
+    if(!got&&Date.now()-startedAt<1500){S.spFail++;if(S.spFail>=3){S.speechOn=false;updSpeechBtn();toast('실시간 자막이 이 브라우저에서 동작하지 않습니다(아이패드 홈 화면 앱 미지원). Safari 탭에서 열거나 녹음을 이용하세요.');return;}}
+    setTimeout(spawnSR,isApple?1500:400);
+  };
+  try{r.start();S.sr=r;S.spLast=Date.now();}catch(e){S.speechOn=false;updSpeechBtn();toast('음성 인식 시작 실패: '+e.message);}
+}
+function startSpeech(){
+  if(!SR){toast('이 브라우저는 실시간 자막을 지원하지 않습니다. 녹음을 이용하세요.');return;}
+  S.speechOn=true;S.spFail=0;updSpeechBtn();spawnSR();
+  if(isAndroid)toast('갤럭시 Chrome은 인식이 재시작될 때마다 알림음을 냅니다. 소리를 무음으로 두세요.');
+}
+function stopSpeech(){S.speechOn=false;const r=S.sr;S.sr=null;try{r?.stop();}catch(e){}interim='';renderTranscript();updSpeechBtn();}
+function updSpeechBtn(){$('btnSpeech').textContent=S.speechOn?'💬 실시간 자막 켜짐':'💬 실시간 자막 꺼짐';$('btnSpeech').classList.toggle('active',S.speechOn);}
+$('btnSpeech').onclick=()=>S.speechOn?stopSpeech():startSpeech();
+$('spLang').onchange=()=>{if(S.speechOn){stopSpeech();startSpeech();}};
+setInterval(()=>{if(S.speechOn&&S.sr&&Date.now()-S.spLast>60000){try{S.sr.abort();}catch(e){}}},10000); // watchdog: silent hang -> restart
+
+// ---------- settings UI ----------
+$('sens').oninput=e=>$('sensV').textContent=e.target.value;
+$('stable').oninput=e=>$('stableV').textContent=e.target.value;
+['sens','stable','aspectSel','outW','dedupe','ocrOn','ocrLang','spLang'].forEach(id=>{
+  const el=$(id);try{const v=localStorage.getItem('sc_'+id);if(v!==null){if(el.type==='checkbox')el.checked=v==='1';else el.value=v;}}catch(e){}
+  el.addEventListener('change',()=>{try{localStorage.setItem('sc_'+id,el.type==='checkbox'?(el.checked?'1':'0'):el.value);}catch(e){}});
+});
+$('sensV').textContent=$('sens').value;$('stableV').textContent=$('stable').value;
+
+// ---------- boot ----------
+fitOverlay();restore();listCams();
+window.__sc={S,tick,get capture(){return capture;},get replaceLast(){return replaceLast;},setCapture(fn){capture=fn;},setReplace(fn){replaceLast=fn;},setSchedule(fn){schedule=fn;},setLocked,resetTracking,grabSmall,detectComponents,makeThumb,cmpThumbs,classifyChange,rectAspect,dbAll,deleteSlide}; // test hook
+if(!window.isSecureContext)setStatus('bad','HTTPS가 아니어서 카메라를 쓸 수 없습니다');
+if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body>
+</html>
