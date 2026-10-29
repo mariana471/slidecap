@@ -4,7 +4,11 @@
 셔터를 누를 필요가 없고, 옆자리에서 비스듬히 찍어도 정면에서 찍은 것처럼 펴집니다.
 설치 앱이 아니라 **브라우저에서 도는 웹앱(PWA)** 이라서 갤럭시(Chrome)와 아이패드(Safari) 모두에서 동작합니다.
 
-## 파일 (전부 올리세요)
+## 배포 주소
+- 앱: **https://mariana471.github.io/slidecap/** (GitHub Pages, HTTPS)
+- 소스 저장소: https://github.com/mariana471/slidecap
+
+## 파일
 | 파일 | 역할 |
 |---|---|
 | `index.html` | 앱 전체 (감지·보정·저장·OCR·녹음·자막) |
@@ -13,22 +17,18 @@
 | `.nojekyll` | GitHub Pages가 파일을 그대로 서빙하게 하는 빈 파일 |
 | `README.md` | 이 설명 |
 
-## 1. 올리기 (한 번만, 5분)
-카메라·마이크는 **HTTPS 주소**에서만 열리므로 파일을 어딘가에 올려야 합니다.
+## 1. 올리기 — 완료됨
+카메라·마이크는 **HTTPS 주소**에서만 열리므로 GitHub Pages에 올려 두었습니다 (저장소 `mariana471/slidecap`, `main` 브랜치 루트).
 
-**GitHub Pages (무료, 영구) — 권장**
-1. github.com 에서 새 저장소 생성(Public, 이름 예: `slidecap`).
-2. "Add file → Upload files" 로 위 파일을 모두 올리고 Commit. (`.nojekyll`처럼 점으로 시작하는 파일은 숨김 파일이라 안 보일 수 있으니 폴더를 통째로 끌어다 놓으세요.)
-3. Settings → Pages → Branch를 `main` / `(root)` 로 선택 → Save.
-4. 1~2분 뒤 `https://<아이디>.github.io/slidecap/` 가 열립니다.
-5. 나중에 파일을 고쳐 올리면 폰에는 최대 10분 뒤에 반영됩니다(GitHub 캐시). 바로 보려면 폰에서 새로고침을 두 번 하세요.
+나중에 파일을 고쳐서 다시 올리려면 둘 중 하나:
+- github.com 저장소 페이지에서 "Add file → Upload files" 로 바뀐 파일을 올려 덮어쓰기(Commit).
+- 이 폴더에서 `git add -A` → `git commit -m "..."` → `git push` (GitHub CLI로 로그인된 PC).
 
-**Netlify Drop (가입 없이 즉시, 임시 테스트용)**
-https://app.netlify.com/drop 에 PC에서 `slidecap` 폴더를 끌어다 놓으면 바로 주소가 나옵니다. 단, 로그인해서 사이트를 "claim" 하지 않으면 잠시 뒤 사라지므로 학회용으로는 GitHub Pages를 쓰세요.
+반영은 1~2분, 폰에는 최대 10분 뒤에 나타납니다(GitHub 캐시). 바로 보려면 폰에서 새로고침을 두 번 하세요.
 
 ## 2. 폰/패드에서 설치
-- 갤럭시: Chrome으로 주소 열기 → ⋮ 메뉴 → "앱 설치" 또는 "홈 화면에 추가".
-- 아이패드: Safari로 열기 → 공유 버튼 → "홈 화면에 추가". 카메라 권한은 홈 화면 앱을 열 때마다 다시 물어보니 "허용"을 누르세요.
+- 갤럭시: Chrome으로 https://mariana471.github.io/slidecap/ 열기 → ⋮ 메뉴 → "앱 설치" 또는 "홈 화면에 추가".
+- 아이패드: Safari로 같은 주소 열기 → 공유 버튼 → "홈 화면에 추가". 카메라 권한은 홈 화면 앱을 열 때마다 다시 물어보니 "허용"을 누르세요.
 - 아이패드 주의: 홈 화면 앱에서는 **실시간 자막(음성 인식)이 동작하지 않습니다**. 자막이 필요하면 Safari 탭에서 쓰세요. 녹음·캡처는 둘 다 됩니다.
 
 ## 3. 학회장에서 쓰는 법
